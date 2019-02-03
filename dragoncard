@@ -1,0 +1,137 @@
+#!/bin/bash
+# by Manu Alén @hippi3c0w
+clear
+cat style.txt
+echo " "
+echo "==================================================================="
+echo "=                          DragonCard                             ="
+echo "=                         by @hippi3c0w                           ="
+echo "==================================================================="
+echo " "
+#Defining usage functions
+function usage()
+{
+echo "-h              --help     -   Show all available commands"
+echo "-s              --state    -   Set the state of the network cards"
+echo "-a              --attack   -   Start aireplay programm"
+echo " "
+echo "Example:  ./dragoncard -s on -a "
+
+}
+function usageShell()
+{
+echo "-Ihost                     -   Specify host interface" 
+echo "-Itarget                   -   Specify target interface"
+echo "-ifaces                    -   Show all network cardsin monitor mode"
+echo " "
+}
+	if [[ $2 == off ]] ; then
+		echo "[+] Killing monitor mode to setup to normal state..."
+		echo "[+] Restoring regdomain to ES..."
+		iw reg set ES
+
+		for mon in $(ls -v /sys/class/net/ | grep mon) ; do
+			echo "[+] Deleting monitor $mon..."
+			iw dev $mon del
+			sleep 1
+		done
+		for phy in $(ls -v /sys/class/ieee80211/ | grep phy) ; do
+			order="$(echo $phy | tr -dc '0-9')"
+			echo "[+] Creating managed  wlan$order from $phy..."
+			iw phy $phy interface add "wlan$order" type managed >/dev/null 2>&1
+			sleep 1
+			ifconfig "wlan$order" up 2>/dev/null
+		done
+			echo "[+] Starting network services..."
+			service NetworkManager start >/dev/null 2>&1
+			service avahi-daemon start >/dev/null 2>&1
+			airmon-ng
+			exit 0
+	fi
+
+	if [[ $2 == on ]] ; then
+		echo "[+] Stopping conflicting services..."
+		airmon-ng check kill  >/dev/null 2>&1
+		sleep 2
+
+		echo "[+] Changing regdomain to BO..."
+		iw reg set BP
+
+		for phy in $(ls -v /sys/class/ieee80211/ | grep phy) ; do
+			order="$(echo $phy | tr -dc '0-9')"
+		if [ ! -d "/sys/class/net/mon$order" ] ; then
+			iw phy $phy interface add "mon$order" type monitor >/dev/null 2>&1
+			sleep 1
+			ifconfig "mon$order" down 2>/dev/null
+			macchanger -A "mon$order" >/dev/null 2>&1
+			sleep 1
+			ifconfig "mon$order" up  >/dev/null 2>&1
+			sleep 1
+			iw dev "mon$order" set channel $channel 2>/dev/null
+			setchannel="$(iwlist mon$order chan 2>/dev/null | grep Current | awk '{print $4,$5}' | tr -dc '0-9')"
+			echo " [+]Creating monitor  mon$order from $phy channel $setchannel with MAC $(macchanger -s mon$order | grep Current | cut -d' '  -f 5-)..."
+			iw dev "mon$order" set txpower fixed 30000 2>/dev/null
+		fi
+		done
+
+		for wlan in $(ls -v /sys/class/net/ | grep wlan) ; do
+		echo "[+] Deleting managed  $wlan..."
+		ifconfig $wlan down
+		iw dev $wlan del >/dev/null 2>&1
+		sleep 1
+		done
+		airmon-ng
+		
+
+	fi
+
+#Start the check 
+	if [[ "$3" == "-a" ]] ; then
+		command=" "
+		while [ "$command" != "exit" ]
+		do
+			echo " " 
+			read -p "dragonCard> " command
+
+			echo " "
+			op=`echo "$command"| cut -d "=" -f1`
+			opval=`echo "$command" | cut -d "=" -f2` #obtain the value of option
+			
+				if [[ $op == help ]] ; then
+					usageShell
+				fi
+				if [[ $op == Ihost ]] ; then
+					Ihost=$opval
+					echo $command "added successfully"
+					read -p "dragonCard> " command2
+					op2=`echo "$command2"| cut -d "=" -f1`
+					opval2=`echo "$command2" | cut -d "=" -f2` # var repeated due to itarget option
+						if [[ $op2 == Itarget ]] ; then
+		                                        Itarget=$opval2
+							echo $Itarget
+                		                        aireplay-ng --test $Ihost -i $Itarget
+                                		fi
+
+				fi
+
+				if [[ $op == ifaces ]] ; then
+					monitor=`ifconfig | grep mon`
+					countMon=`ifconfig | grep mon|wc -l`
+					echo "[+] Looking for network cards in monitor mode"
+					sleep 2
+					echo "[+] Network cards in monitor mode"
+					echo "==================================="
+					echo "[+] Total: " $countMon
+					echo $monitor
+				fi
+
+		done
+	fi
+
+	if [[ $# -eq 0 ]] ; then
+	usage
+	fi
+
+	if [[ $1 == -h  ]]; then
+		usage
+	fi
